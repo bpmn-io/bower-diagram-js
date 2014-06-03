@@ -12,9 +12,8 @@
     "canvas"
   ],
   "dependencies": {
-    "jquery": "^2.1.0",
-    "snap.svg": "^0.2.0",
-    "lodash": "^2.4.0"
+    "snap.svg": ">=0.2.0",
+    "lodash": ">=2.4.0"
   },
   "homepage": "http://bpmn.io"
 }
