@@ -1,0 +1,16 @@
+{
+  "name": "diagram-js",
+  "version": "0.0.3",
+  "authors": [
+    "bpmn.io"
+  ],
+  "description": "A modeling framework for the web",
+  "main": "diagram.min.js",
+  "keywords": [
+    "modeler",
+    "modeling",
+    "canvas"
+  ],
+  "dependencies": {},
+  "homepage": "http://bpmn.io"
+}
