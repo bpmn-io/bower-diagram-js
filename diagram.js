@@ -1,30 +1,85 @@
-require=(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);throw new Error("Cannot find module '"+o+"'")}var f=n[o]={exports:{}};t[o][0].call(f.exports,function(e){var n=t[o][1][e];return s(n?n:e)},f,f.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({"4B6uBI":[function(require,module,exports){
-var di = require('./di');
+require=(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);throw new Error("Cannot find module '"+o+"'")}var f=n[o]={exports:{}};t[o][0].call(f.exports,function(e){var n=t[o][1][e];return s(n?n:e)},f,f.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({"diagram-js":[function(require,module,exports){
+module.exports=require('4B6uBI');
+},{}],"4B6uBI":[function(require,module,exports){
+'use strict';
 
-// diagram-js main components
-require('./core/Canvas');
-require('./core/EventBus');
-
+var di = require('didi');
 
 /**
  * @namespace djs
  */
 
-var defaultModule = di.defaultModule;
+/**
+ * Bootstrap an injector from a list of modules, instantiating a number of default components
+ *
+ * @param {Array<didi.Module>} bootstrapModules
+ *
+ * @return {didi.Injector} a injector to use to access the components
+ */
+function bootstrap(bootstrapModules) {
 
+  var modules = [];
+  var components = [];
+
+  function hasModule(m) {
+    return modules.indexOf(m) >= 0;
+  }
+
+  function addModule(m) {
+    modules.push(m);
+  }
+
+  function visit(m) {
+    if (hasModule(m)) {
+      return;
+    }
+
+    (m.__depends__ || []).forEach(visit);
+
+    if (hasModule(m)) {
+      return;
+    }
+
+    addModule(m);
+
+    (m.__init__ || []).forEach(function(c) {
+      components.push(c);
+    });
+  }
+
+  bootstrapModules.forEach(visit);
+
+  var injector = new di.Injector(modules);
+
+  components.forEach(function(c) {
+    // eagerly resolve main components
+    injector.get(c);
+  });
+
+  return injector;
+}
+
+/**
+ * Creates an injector from passed options.
+ *
+ * @param  {Object} options
+ * @return {didi.Injector}
+ */
 function createInjector(options) {
 
   options = options || {};
 
-  var components = [ 'canvas', 'eventBus' ].concat(options.components || []),
-      modules = [].concat(options.modules || []);
+  var configModule = {
+    'config': ['value', options]
+  };
 
-  if (modules.indexOf(defaultModule) === -1) {
-    modules.unshift(defaultModule);
-  }
+  var coreModule = require('./core');
 
-  return di.bootstrap(modules, components, options);
+  var modules = [ configModule, coreModule ].concat(options.modules || []);
+
+  return bootstrap(modules);
 }
+
 
 /**
  * @class
@@ -32,18 +87,77 @@ function createInjector(options) {
  * The main diagram-js entry point that bootstraps the diagram with the given
  * configuration.
  *
+ *
+ * To register extensions with the diagram, pass them as Array<didi.Module> to the constructor
+ *
+ * @example
+ *
+ * Given you would like to create a plug-in that logs whenever a shape
+ * or connection was added to the canvas:
+ *
+ *   * Create the plug-in file:
+ *
+ *     ```javascript
+ *     function MyLoggingPlugin(events) {
+ *       events.on('shape.added', function(event) {
+ *         console.log('shape ', event.shape, ' was added to the diagram');
+ *       });
+ *     }
+ *
+ *     module.exports = {
+ *       __init__: [ 'myLoggingPlugin'],
+ *       myLoggingPlugin: [ 'type', [ 'eventBus', MyLoggingPlugin ]]
+ *     };
+ *     ```
+ *
+ *   * Instantiate the diagram with the new plug-in
+ *
+ *     ```javascript
+ *     var diagram = new Diagram({ modules: [ require('path-to-plugin-file') ] });
+ *
+ *     diagram.invoke([ 'canvas', function(canvas) {
+ *       // add shape to drawing canvas
+ *       canvas.addShape({ x: 10, y: 10 });
+ *     });
+ *
+ *     // 'shape ... was added to the diagram' logged to console
+ *     ```
+ *
  * @param {Object} options
- * @param {String[]} options.components a list of components to instantiate when creating the diagram
- * @param {String[]} options.modules a list of modules to use for locating instantiatable diagram components
+ * @param {Array<didi.Module>} [options.modules] external modules to instantiate with the diagram
+ * @param {didi.Injector} [injector] an (optional) injector to bootstrap the diagram with
  */
 function Diagram(options, injector) {
-  'use strict';
 
   // create injector unless explicitly specified
-  injector = injector || createInjector(options);
+  this.injector = injector = injector || createInjector(options);
 
-  // fire diagram init because
-  // all components have been loaded now
+  // API
+
+  /**
+   * Resolves a diagram service
+   *
+   * @method Diagram#get
+   *
+   * @param {String} name the name of the diagram service to be retrieved
+   * @param {Object} [locals] a number of locals to use to resolve certain dependencies
+   */
+  this.get = injector.get;
+
+  /**
+   * Executes a function into which diagram services are injected
+   *
+   * @method Diagram#invoke
+   *
+   * @param {Function|Object[]} fn the function to resolve
+   * @param {Object} locals a number of locals to use to resolve certain dependencies
+   */
+  this.invoke = injector.invoke;
+
+  // init
+
+  // indicate via event
+
 
   /**
    * An event indicating that all plug-ins are loaded.
@@ -63,308 +177,29 @@ function Diagram(options, injector) {
    * @type {Object}
    * @property {snapsvg.Paper} paper the initialized drawing paper
    */
-  injector.get('eventBus').fire('diagram.init');
-
-  function destroy() {
-    injector.get('eventBus').fire('diagram.destroy');
-  }
-
-  // API
-
-  /**
-   * Resolves a diagram service
-   *
-   * @method Diagram#get
-   *
-   * @param {Function|Object[]} function that should be called with internal diagram services on
-   * @param {Object} locals a number of locals to use to resolve certain dependencies
-   */
-  this.get = injector.get;
-
-  /**
-   * Executes a function into which diagram services are injected
-   *
-   * @method Diagram#invoke
-   *
-   * @param {Function|Object[]} fn the function to resolve
-   * @param {Object} locals a number of locals to use to resolve certain dependencies
-   */
-  this.invoke = injector.invoke;
-
-  /**
-   * Destroys the diagram
-   *
-   * @method  Diagram#destroy
-   */
-  this.destroy = destroy;
+  this.get('eventBus').fire('diagram.init');
 }
 
 module.exports = Diagram;
 
-/**
- * The main diagram module that can be used
- * to register an extension on the diagram.
- *
- * @field Diagram.components
- * @type {didi.Module}
- */
-module.exports.components = defaultModule;
 
 /**
- * Registers an extension with the diagram.
+ * Destroys the diagram
  *
- * @method Diagram.plugin
- * @example
- *
- * var Diagram = require('Diagram');
- *
- * Diagram.plugin('mySamplePlugin', [ 'eventBus', function(events) {
- *   events.on('shape.added', function(event) {
- *     console.log('shape ', event.shape, ' was added to the diagram');
- *   });
- * }]);
- *
- * var diagram = new Diagram({ components: ['mySamplePlugin'] });
- *
- * diagram.invoke([ 'canvas', function(canvas) {
- *
- *   // add shape to drawing canvas
- *   canvas.addShape({ x: 10, y: 10 });
- * });
- *
- * // 'shape ... was added to the diagram' logged to console
- *
- * @param {String} pluginId a unique identifier to reference this plugin from other components
- * @param {Object[]|Function} definition the plugin definition
- *
- * @see Diagram
+ * @method  Diagram#destroy
  */
-module.exports.plugin = defaultModule.type;
-},{"./core/Canvas":5,"./core/EventBus":8,"./di":10}],"diagram-js":[function(require,module,exports){
-module.exports=require('4B6uBI');
-},{}],3:[function(require,module,exports){
+Diagram.prototype.destroy = function() {
+  this.get('eventBus').fire('diagram.destroy');
+};
+},{"./core":10,"didi":36}],3:[function(require,module,exports){
 'use strict';
 
-require('../core/ElementRegistry');
 
-var _ = require('lodash'),
-    setParent = require('../util/ShapeUtil').setParent;
+var _ = (window._);
 
+var AddShapeHandler = require('./cmd/AddShapeHandler'),
+    AddConnectionHandler = require('./cmd/AddConnectionHandler');
 
-/**
- * Implements re- and undoable addition of shapes to the diagram
- *
- * @param {EventBus} events
- * @param {GraphicsFactory} graphicsFactory
- * @param {ElementRegistry} shapes
- */
-function AddShapeHandler(events, graphicsFactory, shapes) {
-
-  var paper;
-
-  /**
-   * Execute add
-   */
-  function execute(ctx) {
-
-    var shape = ctx.shape,
-        parent = ctx.parent || shape.parent;
-
-    // remember parent outside shape
-    ctx.parent = parent;
-
-    // establish shape -> parent -> shape relationship
-    setParent(shape, parent);
-
-    var gfx = graphicsFactory.createShape(paper, shape);
-
-    events.fire('shape.added', { element: shape, gfx: gfx });
-
-    return gfx;
-  }
-
-
-  /**
-   * Execute revert
-   */
-  function revert(ctx) {
-
-    var shape = ctx.shape,
-        gfx = shapes.getGraphicsByShape(shape);
-
-    setParent(shape, null);
-
-    events.fire('shape.removed', { element: shape, gfx: gfx });
-
-    gfx.remove();
-  }
-
-
-  function canExecute(ctx) {
-    return true;
-  }
-
-
-  // load paper from canvas init event
-  events.on('canvas.init', function(e) {
-    paper = e.paper;
-  });
-
-
-  // API
-
-  this.execute = execute;
-  this.revert = revert;
-
-  this.canExecute = canExecute;
-}
-
-
-AddShapeHandler.$inject = ['eventBus', 'graphicsFactory', 'elementRegistry'];
-
-// export
-module.exports = AddShapeHandler;
-},{"../core/ElementRegistry":7,"../util/ShapeUtil":30,"lodash":36}],4:[function(require,module,exports){
-require('../core/ElementRegistry');
-
-var _ = require('lodash'),
-    selfAndAllChildren = require('../util/ShapeUtil').selfAndAllChildren,
-    setParent = require('../util/ShapeUtil').setParent;
-
-
-/**
- * Implements re- and undoable movement of shapes and their
- * related graphical representations.
- *
- * @param {ElementRegistry} shapes
- */
-function MoveShapesHandler(elementRegistry) {
-
-  function getAllMovedShapes(shapes) {
-    var allShapes = selfAndAllChildren(shapes);
-    var idMap = {};
-
-    _.forEach(allShapes, function(s) {
-      var id = s.id;
-
-      idMap[s.id] = s;
-    });
-
-    return {
-      shapes: allShapes,
-      byId: idMap
-    };
-  }
-
-  /**
-   * Executes a move shape operation
-   */
-  function execute(ctx) {
-
-    var dx = ctx.dx,
-        dy = ctx.dy,
-        shapes = ctx.shapes,
-        newParent = ctx.newParent;
-
-    var oldParents = {};
-
-    var all = getAllMovedShapes(shapes);
-
-    _.forEach(all.shapes, function(s) {
-      var newX = s.x + dx,
-          newY = s.y + dy,
-          sid = s.id;
-
-      s.x = newX;
-      s.y = newY;
-
-      if (s.parent && all.byId[s.parent.id]) {
-        oldParents[sid] = s.parent;
-      } else {
-        oldParents[sid] = setParent(s, newParent);
-      }
-
-      var gfx = elementRegistry.getGraphicsByShape(s);
-      gfx.translate(newX, newY);
-
-      if (s.parent) {
-        var parentGfx = elementRegistry.getGraphicsByShape(s.parent);
-        gfx.insertAfter(parentGfx);
-      }
-    });
-
-    // remember previous parents
-    // TODO(nre): is this a good idea?
-    ctx.oldParents = oldParents;
-
-    return true;
-  }
-
-  /**
-   * Reverts a move shape operation
-   */
-  function revert(ctx) {
-
-    var dx = ctx.dx * -1,
-        dy = ctx.dy * -1,
-        shapes = ctx.shapes,
-        oldParents = ctx.oldParents;
-
-
-    var all = getAllMovedShapes(shapes);
-
-    _.forEach(all.shapes, function(s) {
-      var newX = s.x + dx,
-          newY = s.y + dy;
-
-      s.x = newX;
-      s.y = newY;
-
-      setParent(s, oldParents[s.id]);
-
-      var gfx = elementRegistry.getGraphicsByShape(s);
-      gfx.translate(newX, newY);
-    });
-
-    return true;
-  }
-
-  /**
-   * Can move be executed?
-   */
-  function canExecute(ctx) {
-    return true;
-  }
-
-
-  // API
-
-  this.execute = execute;
-  this.revert = revert;
-
-  this.canExecute = canExecute;
-}
-
-
-MoveShapesHandler.$inject = [ 'elementRegistry' ];
-
-// export
-module.exports = MoveShapesHandler;
-},{"../core/ElementRegistry":7,"../util/ShapeUtil":30,"lodash":36}],5:[function(require,module,exports){
-'use strict';
-
-var diagramModule = require('../di').defaultModule;
-
-var AddShapeHandlerHandler = require('../commands/AddShapeHandler');
-
-var _ = require('lodash');
-
-
-// required components
-require('./EventBus');
-require('./CommandStack');
-require('./GraphicsFactory');
-require('./ElementRegistry');
 
 /**
  * @type djs.ShapeDescriptor
@@ -373,7 +208,7 @@ require('./ElementRegistry');
 /**
  * Creates a HTML container element for a SVG element with
  * the given configuration
-
+ *
  * @param  {Object} options
  * @return {DOMElement} the container element
  */
@@ -444,10 +279,19 @@ function Canvas(config, events, commandStack, graphicsFactory, elementRegistry) 
       throw new Error('element must have an id');
     }
 
-    if (elementRegistry.getShapeById(element.id)) {
+    if (elementRegistry.getById(element.id)) {
       throw new Error('element with id ' + element.id + ' already exists');
     }
   }
+
+
+  // register shape add handlers
+  commandStack.registerHandler('shape.add', AddShapeHandler);
+
+  // register connection add handlers
+  commandStack.registerHandler('connection.add', AddConnectionHandler);
+
+
 
   /**
    * Adds a shape to the canvas
@@ -475,11 +319,9 @@ function Canvas(config, events, commandStack, graphicsFactory, elementRegistry) 
 
     commandStack.execute('shape.add', { shape: shape });
 
+    /* jshint -W040 */
     return this;
   }
-
-  // register shape add handlers
-  commandStack.registerHandler('shape.add', AddShapeHandlerHandler);
 
 
   /**
@@ -495,8 +337,6 @@ function Canvas(config, events, commandStack, graphicsFactory, elementRegistry) 
 
     validateId(connection);
 
-    var gfx = graphicsFactory.createConnection(paper, connection);
-
     /**
      * An event indicating that a new connection has been added to the canvas.
      *
@@ -507,9 +347,10 @@ function Canvas(config, events, commandStack, graphicsFactory, elementRegistry) 
      * @property {djs.ElementDescriptor} element the connection descriptor
      * @property {Object} gfx the graphical representation of the connection
      */
-    events.fire('connection.added', { element: connection, gfx: gfx });
 
-    // for chaining of API calls
+    commandStack.execute('connection.add', { connection: connection });
+
+    /* jshint -W040 */
     return this;
   }
 
@@ -554,7 +395,7 @@ function Canvas(config, events, commandStack, graphicsFactory, elementRegistry) 
    * @param {djs.ElementDescriptor} element descriptor of the element
    */
   function getGraphics(element) {
-    return elementRegistry.getGraphicsByShape(element);
+    return elementRegistry.getGraphicsByElement(element);
   }
 
   /**
@@ -773,6 +614,31 @@ function Canvas(config, events, commandStack, graphicsFactory, elementRegistry) 
     paper = null;
   });
 
+
+  // redraw shapes / connections on change
+
+  var self = this;
+
+  events.on('element.changed', function(event) {
+
+    if (event.element.waypoints) {
+      events.fire('connection.changed', event);
+    } else {
+      events.fire('shape.changed', event);
+    }
+  });
+
+  events.on('shape.changed', function(event) {
+    var element = event.element;
+    graphicsFactory.updateShape(element, event.gfx || self.getGraphics(element));
+  });
+
+  events.on('connection.changed', function(event) {
+    var element = event.element;
+    graphicsFactory.updateConnection(element, event.gfx || self.getGraphics(element));
+  });
+
+
   this.zoom = zoom;
   this.scroll = scroll;
 
@@ -787,18 +653,51 @@ function Canvas(config, events, commandStack, graphicsFactory, elementRegistry) 
   this.sendToFront = sendToFront;
 }
 
-diagramModule.type('canvas', [ 'config', 'eventBus', 'commandStack', 'graphicsFactory', 'elementRegistry', Canvas ]);
+/**
+ * Return the absolute bounding box for the given element
+ *
+ * The absolute bounding box may be used to display overlays in the
+ * callers (browser) coordinate system rather than the zoomed in/out
+ * canvas coordinates.
+ *
+ * @param  {ElementDescriptor} element
+ * @return {Bounds} the absolute bounding box
+ */
+Canvas.prototype.getAbsoluteBBox = function(element) {
+  var vbox = this.viewbox();
+
+  var gfx = this.getGraphics(element);
+
+  var transformBBox = gfx.getBBox(true);
+  var bbox = gfx.getBBox();
+
+  var x = (bbox.x - transformBBox.x) * vbox.scale - vbox.x * vbox.scale;
+  var y = (bbox.y - transformBBox.y) * vbox.scale - vbox.y * vbox.scale;
+
+  var width = (bbox.width + 2 * transformBBox.x) * vbox.scale;
+  var height = (bbox.height + 2 * transformBBox.y) * vbox.scale;
+
+  return {
+    x: x,
+    y: y,
+    width: width,
+    height: height
+  };
+};
+
+Canvas.$inject = [
+  'config',
+  'eventBus',
+  'commandStack',
+  'graphicsFactory',
+  'elementRegistry' ];
 
 module.exports = Canvas;
-},{"../commands/AddShapeHandler":3,"../di":10,"./CommandStack":6,"./ElementRegistry":7,"./EventBus":8,"./GraphicsFactory":9,"lodash":36}],6:[function(require,module,exports){
+},{"./cmd/AddConnectionHandler":8,"./cmd/AddShapeHandler":9}],4:[function(require,module,exports){
 'use strict';
 
-var diagramModule = require('../di').defaultModule;
+var _ = (window._);
 
-var _ = require('lodash');
-
-
-require('./EventBus');
 
 /**
  * @namespace djs
@@ -966,6 +865,8 @@ function CommandStack(injector, events) {
   function clear() {
     stack.length = 0;
     stackIdx = -1;
+
+    events.fire('commandStack.changed');
   }
 
 
@@ -991,38 +892,34 @@ function CommandStack(injector, events) {
     register(command, handler);
   }
 
-  return {
-    execute: execute,
-    undo: undo,
-    redo: redo,
-    clear: clear,
-    getStack: getStack,
-    getStackIndex: getStackIndex,
-    getHandlers: getHandlers,
-    registerHandler: registerHandler,
-    register: register
-  };
+  this.execute = execute;
+  this.undo = undo;
+  this.redo = redo;
+  this.clear = clear;
+  this.getStack = getStack;
+  this.getStackIndex = getStackIndex;
+  this.getHandlers = getHandlers;
+  this.registerHandler = registerHandler;
+  this.register = register;
 }
 
-diagramModule.type('commandStack', [ 'injector', 'eventBus', CommandStack ]);
+CommandStack.$inject = [ 'injector', 'eventBus' ];
 
 module.exports = CommandStack;
-},{"../di":10,"./EventBus":8,"lodash":36}],7:[function(require,module,exports){
-var diagramModule = require('../di').defaultModule;
+},{}],5:[function(require,module,exports){
+'use strict';
 
-var _ = require('lodash');
+var _ = (window._);
 
-// required components
-require('./EventBus');
 
 /**
  * @class
  *
  * A registry that keeps track of all shapes in the diagram.
  *
- * @param {EventBus} events the event bus
+ * @param {EventBus} eventBus the event bus
  */
-function ElementRegistry(events) {
+function ElementRegistry(eventBus) {
 
   // mapping shape.id -> container
   var shapeMap = {};
@@ -1051,9 +948,9 @@ function ElementRegistry(events) {
   }
 
   function removeShape(shape) {
-    var gfx = getGraphicsByShape(shape);
+    var gfx = getGraphicsByElement(shape);
 
-    if(shape.parent) {
+    if (shape.parent) {
       for(var i = 0; i < shape.parent.children.length;i++) {
         if(shape.parent.children[i].id === shape.id) {
           shape.parent.children.splice(i, 1);
@@ -1066,9 +963,9 @@ function ElementRegistry(events) {
   }
 
   /**
-   * @method ElementRegistry#getShapeByGraphics
+   * @method ElementRegistry#getByGraphics
    */
-  function getShapeByGraphics(gfx) {
+  function getByGraphics(gfx) {
     var id = _.isString(gfx) ? gfx : gfx.id;
 
     var container = graphicsMap[id];
@@ -1078,9 +975,9 @@ function ElementRegistry(events) {
   }
 
   /**
-   * @method ElementRegistry#getShapeById
+   * @method ElementRegistry#getById
    */
-  function getShapeById(id) {
+  function getById(id) {
     var container = shapeMap[id];
     if (container) {
       return container.shape;
@@ -1088,9 +985,9 @@ function ElementRegistry(events) {
   }
 
   /**
-   * @method ElementRegistry#getGraphicsByShape
+   * @method ElementRegistry#getGraphicsByElement
    */
-  function getGraphicsByShape(shape) {
+  function getGraphicsByElement(shape) {
     var id = _.isString(shape) ? shape : shape.id;
 
     var container = shapeMap[id];
@@ -1099,36 +996,36 @@ function ElementRegistry(events) {
     }
   }
 
-  events.on('shape.added', function(event) {
+  eventBus.on('shape.added', function(event) {
     addShape(event.element, event.gfx);
   });
 
-  events.on('connection.added', function(event) {
+  eventBus.on('connection.added', function(event) {
     addShape(event.element, event.gfx);
   });
 
-  events.on('shape.removed', function(event) {
+  eventBus.on('shape.removed', function(event) {
     removeShape(event.element);
   });
 
-  events.on('connection.removed', function(event) {
+  eventBus.on('connection.removed', function(event) {
     removeShape(event.element);
   });
 
   return {
-    getGraphicsByShape: getGraphicsByShape,
-    getShapeById: getShapeById,
-    getShapeByGraphics: getShapeByGraphics
+    getGraphicsByElement: getGraphicsByElement,
+    getById: getById,
+    getByGraphics: getByGraphics
   };
 }
 
-diagramModule.type('elementRegistry', [ 'eventBus', ElementRegistry ]);
+ElementRegistry.$inject = [ 'eventBus' ];
 
 module.exports = ElementRegistry;
-},{"../di":10,"./EventBus":8,"lodash":36}],8:[function(require,module,exports){
-var diagramModule = require('../di').defaultModule;
+},{}],6:[function(require,module,exports){
+'use strict';
 
-var _ = require('lodash');
+var _ = (window._);
 
 /**
  * @global
@@ -1146,8 +1043,6 @@ var EventPriority = {
  * A general purpose event bus
  */
 function EventBus() {
-  'use strict';
-
   var listenerMap = {};
 
   function getListeners(name) {
@@ -1225,6 +1120,8 @@ function EventBus() {
    */
   function once(event, callback) {
 
+    /* jshint -W040 */
+
     var self = this;
     var wrappedCallback = function() {
       var eventType = arguments[0].type;
@@ -1294,6 +1191,9 @@ function EventBus() {
    * @param {...Object} additional arguments to be passed to the callback functions
    */
   function fire() {
+
+    /* jshint -W040 */
+
     var event, eventType,
         listeners, i, l,
         args;
@@ -1353,127 +1253,285 @@ function EventBus() {
   this.fire = fire;
 }
 
-diagramModule.type('eventBus', EventBus);
 
 module.exports = EventBus;
-},{"../di":10,"lodash":36}],9:[function(require,module,exports){
-var diagramModule = require('../di').defaultModule;
+},{}],7:[function(require,module,exports){
+'use strict';
 
-// required components
-require('./EventBus');
+/**
+ * Creates a gfx container for shapes and connections
+ *
+ * The layout is as follows:
+ *
+ * <g data-element-id="element-1" class="djs-group djs-(type=shape|connection)">
+ *   <g class="djs-visual">
+ *     <!-- the renderer draws in here -->
+ *   </g>
+ *
+ *   <!-- extensions (overlays, click box, ...) goes here
+ * </g>
+ *
+ * @param {Object} root
+ * @param {String} type the type of the element, i.e. shape | connection
+ */
+function createContainer(root, type) {
+  var gfxContainer = root.group();
 
-require('../draw/Snap');
-require('../draw/Renderer');
+  gfxContainer
+    .addClass('djs-group')
+    .addClass('djs-' + type);
+
+  var gfxGroup = gfxContainer.group().addClass('djs-visual');
+
+  return gfxContainer;
+}
+
+/**
+ * Clears the graphical representation of the element and returns the
+ * cleared result (the <g class="djs-visual" /> element).
+ */
+function clearVisual(gfx) {
+
+  var oldVisual = gfx.select('.djs-visual');
+
+  var newVisual = gfx.group().addClass('djs-visual').before(oldVisual);
+
+  oldVisual.remove();
+
+  return newVisual;
+}
+
+
+function createContainerFactory(type) {
+  return function(root, data) {
+    return createContainer(root, type).attr('data-element-id', data.id);
+  };
+}
+
 
 /**
  * A factory that creates graphical elements
  *
- * @param {EventBus} events
  * @param {Renderer} renderer
  * @param {Snap} snap
  */
-function GraphicsFactory(events, renderer, snap) {
-
-  function createParent(paper, type) {
-
-    return paper
-      .group()
-        .addClass('djs-group')
-        .addClass('djs-' + type);
-  }
-
-  function createShape(paper, data) {
-
-    var parent = createParent(paper, 'shape');
-
-    var gfx = renderer.drawShape(parent, data);
-    gfx.addClass('djs-visual');
-
-    setPosition(parent, data.x, data.y);
-
-    if (data.hidden) {
-      parent.attr('visibility', 'hidden');
-    }
-
-    return parent;
-  }
-
-  function createConnection(paper, data) {
-    var parent = createParent(paper, 'connection');
-
-    var gfx = renderer.drawConnection(parent, data);
-    gfx.addClass('djs-visual');
-
-    return parent;
-  }
-
-  function setPosition(gfx, x, y) {
-    var positionMatrix = new snap.Matrix();
-    positionMatrix.translate(x, y);
-    gfx.transform(positionMatrix);
-  }
-
-  function createPaper(options) {
-    return snap.createSnapAt(options.width, options.height, options.container);
-  }
-
-  // API
-  this.createConnection = createConnection;
-  this.createShape = createShape;
-  this.createPaper = createPaper;
+function GraphicsFactory(renderer, snap) {
+  this._renderer = renderer;
+  this._snap = snap;
 }
 
-diagramModule.type('graphicsFactory', [ 'eventBus', 'renderer', 'snap', GraphicsFactory ]);
+GraphicsFactory.prototype.createShape = createContainerFactory('shape');
+
+GraphicsFactory.prototype.createConnection = createContainerFactory('connection');
+
+GraphicsFactory.prototype.createPaper = function(options) {
+  return this._snap.createSnapAt(options.width, options.height, options.container);
+};
+
+
+GraphicsFactory.prototype.updateShape = function(element, gfx) {
+
+  // clear visual
+  var gfxGroup = clearVisual(gfx);
+
+  // redraw
+  this._renderer.drawShape(gfxGroup, element);
+
+  // update positioning
+  gfx.translate(element.x, element.y);
+
+  if (element.hidden) {
+    gfx.attr('visibility', 'hidden');
+  }
+};
+
+
+GraphicsFactory.prototype.updateConnection = function(element, gfx) {
+
+  // clear visual
+  var gfxGroup = clearVisual(gfx);
+  this._renderer.drawConnection(gfxGroup, element);
+
+  if (element.hidden) {
+    gfx.attr('visibility', 'hidden');
+  }
+};
+
+
+GraphicsFactory.$inject = [ 'renderer', 'snap' ];
 
 module.exports = GraphicsFactory;
-},{"../di":10,"../draw/Renderer":11,"../draw/Snap":12,"./EventBus":8}],10:[function(require,module,exports){
-var di = require('didi');
-
-var Module = di.Module,
-    Injector = di.Injector;
-
-/**
- * Bootstrap an injector from a list of modules, instantiating a number of default components
- *
- * @param {Array<didi.Module>} modules
- * @param {Array<String>} components
- * @param {Object} config
- *
- * @return {didi.Injector} a injector to use to access the components
- */
-function bootstrap(modules, components, config) {
-
-  var configModule = {
-    'config': ['value', config]
-  };
-
-  modules.unshift(configModule);
-
-  var injector = new Injector(modules);
-
-  components.forEach(function(c) {
-
-    // eagerly resolve main components
-    injector.get(c);
-  });
-
-  return injector;
-}
-
-// publish the default module for diagram-js
-module.exports = {
-  defaultModule: new Module(),
-  bootstrap: bootstrap
-};
-},{"didi":33}],11:[function(require,module,exports){
+},{}],8:[function(require,module,exports){
 'use strict';
 
-var diagramModule = require('../di').defaultModule;
+
+var _ = (window._);
+
+
+/**
+ * Implements re- and undoable addition of connections to the diagram
+ *
+ * @param {EventBus} events
+ * @param {GraphicsFactory} graphicsFactory
+ * @param {ElementRegistry} shapes
+ */
+function AddConnectionHandler(events, graphicsFactory, shapes) {
+
+  var paper;
+
+  /**
+   * Execute add
+   */
+  function execute(ctx) {
+
+    var connection = ctx.connection;
+
+    var gfx = graphicsFactory.createConnection(paper, connection);
+
+    events.fire('connection.changed', { element: connection, gfx: gfx });
+    events.fire('connection.added', { element: connection, gfx: gfx });
+
+    return gfx;
+  }
+
+
+  /**
+   * Execute revert
+   */
+  function revert(ctx) {
+
+    var connection = ctx.connection,
+        gfx = shapes.getGraphicsByElement(connection);
+
+    events.fire('connection.removed', { element: connection, gfx: gfx });
+
+    gfx.remove();
+  }
+
+
+  function canExecute(ctx) {
+    return true;
+  }
+
+
+  // load paper from canvas init event
+  events.on('canvas.init', function(e) {
+    paper = e.paper;
+  });
+
+
+  // API
+
+  this.execute = execute;
+  this.revert = revert;
+
+  this.canExecute = canExecute;
+}
+
+
+AddConnectionHandler.$inject = ['eventBus', 'graphicsFactory', 'elementRegistry'];
+
+// export
+module.exports = AddConnectionHandler;
+},{}],9:[function(require,module,exports){
+'use strict';
+
+
+var _ = (window._),
+    setParent = require('../../util/ShapeUtil').setParent;
+
+
+/**
+ * Implements re- and undoable addition of shapes to the diagram
+ *
+ * @param {EventBus} events
+ * @param {GraphicsFactory} graphicsFactory
+ * @param {ElementRegistry} shapes
+ */
+function AddShapeHandler(events, graphicsFactory, shapes) {
+
+  var paper;
+
+  /**
+   * Execute add
+   */
+  function execute(ctx) {
+
+    var shape = ctx.shape,
+        parent = ctx.parent || shape.parent;
+
+    // remember parent outside shape
+    ctx.parent = parent;
+
+    // establish shape -> parent -> shape relationship
+    setParent(shape, parent);
+
+    var gfx = graphicsFactory.createShape(paper, shape);
+
+    events.fire('shape.changed', { element: shape, gfx: gfx });
+
+    events.fire('shape.added', { element: shape, gfx: gfx });
+
+    return gfx;
+  }
+
+
+  /**
+   * Execute revert
+   */
+  function revert(ctx) {
+
+    var shape = ctx.shape,
+        gfx = shapes.getGraphicsByElement(shape);
+
+    setParent(shape, null);
+
+    events.fire('shape.removed', { element: shape, gfx: gfx });
+
+    gfx.remove();
+  }
+
+
+  function canExecute(ctx) {
+    return true;
+  }
+
+
+  // load paper from canvas init event
+  events.on('canvas.init', function(e) {
+    paper = e.paper;
+  });
+
+
+  // API
+
+  this.execute = execute;
+  this.revert = revert;
+
+  this.canExecute = canExecute;
+}
+
+
+AddShapeHandler.$inject = ['eventBus', 'graphicsFactory', 'elementRegistry'];
+
+// export
+module.exports = AddShapeHandler;
+},{"../../util/ShapeUtil":34}],10:[function(require,module,exports){
+'use strict';
+
+module.exports = {
+  __depends__: [ require('../draw') ],
+  __init__: [ 'canvas' ],
+  canvas: [ 'type', require('./Canvas') ],
+  commandStack: [ 'type', require('./CommandStack') ],
+  elementRegistry: [ 'type', require('./ElementRegistry') ],
+  eventBus: [ 'type', require('./EventBus') ],
+  graphicsFactory: [ 'type', require('./GraphicsFactory') ]
+};
+},{"../draw":14,"./Canvas":3,"./CommandStack":4,"./ElementRegistry":5,"./EventBus":6,"./GraphicsFactory":7}],11:[function(require,module,exports){
+'use strict';
 
 // required components
-require('../core/EventBus');
-require('./Styles');
-
 
 function flattenPoints(points) {
   var result = [];
@@ -1492,49 +1550,44 @@ function flattenPoints(points) {
  *
  * The default renderer used for shapes and connections.
  *
- * @param {EventBus} events
  * @param {Styles} styles
  */
-function Renderer(events, styles) {
+function Renderer(styles) {
   this.CONNECTION_STYLE = styles.style([ 'no-fill' ]);
   this.SHAPE_STYLE = styles.style({ fill: 'fuchsia' });
 }
 
-Renderer.prototype.drawShape = function drawShape(paper, data) {
+Renderer.prototype.drawShape = function drawShape(gfxGroup, data) {
   if (!data.width || !data.height) {
     throw new Error('must specify width and height properties for new shape');
   }
 
-  return paper.rect(0, 0, data.width, data.height, 10, 10).attr(this.SHAPE_STYLE);
+  return gfxGroup.rect(0, 0, data.width, data.height, 10, 10).attr(this.SHAPE_STYLE);
 };
 
-Renderer.prototype.drawConnection = function drawConnection(paper, data) {
+Renderer.prototype.drawConnection = function drawConnection(gfxGroup, data) {
   var points = flattenPoints(data.waypoints);
-  return paper.polyline(points).attr(this.CONNECTION_STYLE);
+  return gfxGroup.polyline(points).attr(this.CONNECTION_STYLE);
 };
 
 
-diagramModule.type('renderer', [ 'eventBus', 'styles', Renderer ]);
+Renderer.$inject = ['styles'];
 
 
 module.exports = Renderer;
 module.exports.flattenPoints = flattenPoints;
-},{"../core/EventBus":8,"../di":10,"./Styles":13}],12:[function(require,module,exports){
-var diagramModule = require('../di').defaultModule;
-
-var snapsvg = require('snapsvg');
+},{}],12:[function(require,module,exports){
+var snapsvg = (window.Snap);
 
 // require snapsvg extensions
 require('./snapsvg-extensions');
 
-// register as a value
-diagramModule.value('snap', snapsvg);
-
 module.exports = snapsvg;
-},{"../di":10,"./snapsvg-extensions":14,"snapsvg":37}],13:[function(require,module,exports){
-var diagramModule = require('../di').defaultModule;
+},{"./snapsvg-extensions":15}],13:[function(require,module,exports){
+'use strict';
 
-var _ = require('lodash');
+var _ = (window._);
+
 
 /**
  * A component that manages shape styles
@@ -1592,11 +1645,19 @@ function Styles() {
   };
 }
 
-diagramModule.type('styles', Styles);
-
 module.exports = Styles;
-},{"../di":10,"lodash":36}],14:[function(require,module,exports){
-var Snap = require('snapsvg');
+},{}],14:[function(require,module,exports){
+'use strict';
+
+module.exports = {
+  renderer: [ 'type', require('./Renderer') ],
+  snap: [ 'value', require('./Snap') ],
+  styles: [ 'type', require('./Styles') ]
+};
+},{"./Renderer":11,"./Snap":12,"./Styles":13}],15:[function(require,module,exports){
+'use strict';
+
+var Snap = (window.Snap);
 
 /**
  * @module snapsvg/extensions
@@ -1780,188 +1841,8 @@ Snap.plugin(function (Snap, Element, Paper, global) {
     return new Snap(svg);
   };
 });
-},{"snapsvg":37}],15:[function(require,module,exports){
-require('../core/EventBus');
-require('../core/ElementRegistry');
-
-require('./InteractionEvents');
-
-var Diagram = require('../Diagram'),
-    _ = require('lodash');
-
-
-/**
- * Provides bendpoint visualization, hover and interactivity.
- * 
- * @class
- *
- * @param {EventBus} events the event bus
- * @param {ElementRegistry} shapes the shape registry
- * @param {CommandStack} commandStack the command stack
- */
-function Bendpoints(events, shapes, canvas, commandStack) {
-
-  var DRAG_START_THRESHOLD = 10;
-
-  function dragStartThresholdReached(dx, dy) {
-    return Math.abs(dx) > DRAG_START_THRESHOLD ||
-           Math.abs(dy) > DRAG_START_THRESHOLD;
-  }
-
-  var paper;
-
-  function makeDraggable(connection, gfx, bendpointGfx) {
-
-    var dragCtx;
-
-    function connectOver(event) {
-      var dragEvt = _.extend({}, event, { dragCtx: dragCtx });
-
-      events.fire('shape.connectover', dragEvt);
-
-      dragCtx.hover = event.gfx;
-    }
-
-    function connectOut(event) {
-      var dragEvt = _.extend({}, event, { dragCtx: dragCtx });
-
-      events.fire('shape.connectout', dragEvt);
-
-      delete dragCtx.hover;
-    }
-
-    bendpointGfx.drag(function dragging(dx, dy, x, y, e) {
-
-      var graphics = dragCtx.graphics,
-          dragGroup = dragCtx.dragGroup;
-
-      // drag start
-      if (!dragCtx.dragging && dragStartThresholdReached(dx, dy)) {
-
-        events.on('shape.hover', connectOver);
-        events.on('shape.out', connectOut);
-
-        dragCtx.dragging = true;
-
-        dragCtx.dragGroup = dragGroup = paper.group(graphics.clone()).attr('pointer-events', 'none');
-
-        /**
-         * An event indicating that a drag operation has started
-         *
-         * @memberOf Drag
-         * 
-         * @event shape.dragstart
-         * @type {Object}
-         * 
-         * @property {djs.ElementDescriptor} element the shape descriptor
-         * @property {Object} gfx the graphical representation of the shape
-         * @property {Object} dragCtx the drag context
-         */
-        events.fire('bendpoint.dragstart', { element: connection, gfx: gfx, dragCtx: dragCtx });
-      }
-
-      // drag move
-      if (dragCtx.dragging) {
-
-        _.extend(dragCtx, {
-          dx: dx, dy: dy
-        });
-
-        dragGroup.translate(dx, dy);
-
-        /**
-         * An event indicating that a move happens during a drag operation
-         *
-         * @memberOf Drag
-         * 
-         * @event shape.dragmove
-         * @type {Object}
-         * 
-         * @property {djs.ElementDescriptor} element the shape descriptor
-         * @property {Object} gfx the graphical representation of the shape
-         * @property {Object} dragCtx the drag context
-         */
-        events.fire('bendpoint.dragmove', { element: connection, gfx: gfx, dragCtx: dragCtx });
-      }
-    }, function dragStart(x, y, e) {
-
-        // prepare a drag ctx that gets later activated when
-        // a given drag threshold is reached
-        dragCtx = {
-          graphics: bendpointGfx,
-          connectionGfx: gfx,
-          connection: connection
-        };
-    }, function dragEnd(x, y, e) {
-
-      events.off('shape.hover', connectOver);
-      events.off('shape.out', connectOut);
-
-      if (dragCtx.dragging) {
-
-        var event = { element: connection, gfx: gfx, dragCtx: dragCtx };
-
-        dragCtx.dragGroup.remove();
-
-        /**
-         * An event indicating that a drag operation has ended
-         *
-         * @memberOf Drag
-         * 
-         * @event shape.dragstart
-         * @type {Object}
-         * 
-         * @property {djs.ElementDescriptor} element the shape descriptor
-         * @property {Object} gfx the graphical representation of the shape
-         * @property {Object} dragCtx the drag context
-         */
-        events.fire('bendpoint.dragend', event);
-
-        if (!event.isDefaultPrevented()) {
-          commandStack.execute('movebendpoint', { event: event });
-        }
-      }
-
-      dragCtx = null;
-    });
-  }
-
-  function addBendpoints(element, gfx) {
-
-    element.waypoints.forEach(function(p) {
-
-      var bendpointGfx = paper.circle(p.x, p.y, 10).addClass('djs-bendpoint').appendTo(gfx);
-
-      makeDraggable(element, gfx, bendpointGfx);
-    });
-  }
-
-  events.on('connection.added', function(event) {
-    addBendpoints(event.element, event.gfx);
-  });
-
-
-  // load paper from initialized canvas
-  
-  events.on('canvas.init', function(event) {
-    paper = event.paper;
-  });
-
-  events.on('diagram.destroy', function() {
-    paper = null;
-  });
-}
-
-Diagram.plugin('bendpoints', [
-  'eventBus',
-  'elementRegistry',
-  'canvas',
-  'commandStack',
-  'interactionEvents', Bendpoints ]);
-
-module.exports = Bendpoints;
-},{"../Diagram":"4B6uBI","../core/ElementRegistry":7,"../core/EventBus":8,"./InteractionEvents":17,"lodash":36}],16:[function(require,module,exports){
-var _ = require('lodash'),
+},{}],16:[function(require,module,exports){
+var _ = (window._),
     EventEmitter = require('../util/EventEmitter');
 
 var DEFAULT_THRESHOLD = 10;
@@ -2101,14 +1982,14 @@ function Draggable(gfx, options) {
 Draggable.prototype = EventEmitter.prototype;
 
 module.exports = Draggable;
-},{"../util/EventEmitter":27,"lodash":36}],17:[function(require,module,exports){
-require('../core/EventBus');
+},{"../util/EventEmitter":30}],17:[function(require,module,exports){
+'use strict';
 
-require('../draw/Styles');
 
-var Diagram = require('../Diagram'),
-    _ = require('lodash'),
-    getVisual = require('../util/SvgUtil').getVisual;
+var _ = (window._);
+
+var GraphicsUtil = require('../../util/GraphicsUtil');
+
 
 /**
  * @class
@@ -2116,11 +1997,14 @@ var Diagram = require('../Diagram'),
  * A plugin that provides interactivity in terms of events (mouse over and selection to a diagram).
  *
  * @param {EventBus} events the event bus to attach to
- * @param {Styles} styles to build the interaction shape on
  */
 function InteractionEvents(events, styles) {
 
-  var HIT_STYLE = styles.cls('djs-hit', [ 'no-fill', 'no-border' ]);
+  var HIT_STYLE = styles.cls('djs-hit', [ 'no-fill', 'no-border' ], {
+    pointerEvents: 'stroke',
+    stroke: 'white',
+    strokeWidth: 10
+  });
 
   function isCtxSwitch(e) {
     return !e.relatedTarget || e.target.parentNode !== e.relatedTarget.parentNode;
@@ -2137,7 +2021,7 @@ function InteractionEvents(events, styles) {
 
     var baseEvent = { element: element, gfx: gfx };
 
-    var visual = getVisual(gfx);
+    var visual = GraphicsUtil.getVisual(gfx);
 
     var hit;
 
@@ -2145,13 +2029,18 @@ function InteractionEvents(events, styles) {
       var bbox = visual.getBBox();
       hit = gfx.rect(bbox.x, bbox.y, bbox.width, bbox.height);
     } else {
-      hit = visual.clone();
+      hit = visual.select('*').clone().attr('style', '');
     }
 
     hit.attr(HIT_STYLE).prependTo(gfx);
 
     gfx.hover(function(e) {
       if (isCtxSwitch(e)) {
+        /**
+         * An event indicating that shape|connection has been hovered
+         *
+         * shape.hover, connection.hover
+         */
         fire(e, baseEvent, type + '.hover');
       }
     }, function(e) {
@@ -2178,6 +2067,26 @@ function InteractionEvents(events, styles) {
   }
 
   function registerEvents(events) {
+
+    events.on('canvas.init', function(event) {
+      var paper = event.paper;
+
+      // implement direct canvas click
+      paper.click(function(event) {
+
+        /**
+         * An event indicating that the canvas has been directly clicked
+         *
+         * @memberOf InteractionEvents
+         *
+         * @event canvas.click
+         *
+         * @type {Object}
+         */
+        events.fire('canvas.click', _.extend({}, event, { paper: paper }));
+      });
+    });
+
     events.on('shape.added', function(event) {
       makeShapeSelectable(event.element, event.gfx);
     });
@@ -2190,167 +2099,24 @@ function InteractionEvents(events, styles) {
   registerEvents(events);
 }
 
-Diagram.plugin('interactionEvents', [ 'eventBus', 'styles', InteractionEvents ]);
+
+InteractionEvents.$inject = [ 'eventBus', 'styles' ];
 
 module.exports = InteractionEvents;
-},{"../Diagram":"4B6uBI","../core/EventBus":8,"../draw/Styles":13,"../util/SvgUtil":31,"lodash":36}],18:[function(require,module,exports){
-require('../core/EventBus');
+},{"../../util/GraphicsUtil":31}],18:[function(require,module,exports){
+'use strict';
 
-require('../draw/Styles');
+module.exports = {
+  __init__: [ 'interactionEvents' ],
+  interactionEvents: [ 'type', require('./InteractionEvents') ]
+};
+},{"./InteractionEvents":17}],19:[function(require,module,exports){
+'use strict';
 
-var Diagram = require('../Diagram'),
-    SvgUtil = require('../util/SvgUtil');
+var _ = (window._);
 
-var getVisual = SvgUtil.getVisual;
-
-/**
- * @class
- *
- * A plugin that adds an outline to shapes and connections that may be activated and styled
- * via CSS classes.
- *
- * @param {EventBus} events the event bus
- */
-function Outline(events, styles) {
-
-  var OUTLINE_OFFSET = 10;
-
-  var OUTLINE_STYLE = styles.cls('djs-outline', [ 'no-fill' ]);
-
-  function createOutline(gfx) {
-    return gfx.rect(0, 0, 0, 0)
-            .attr(OUTLINE_STYLE)
-            .prependTo(gfx);
-  }
-
-  function updateOutline(outline, bbox) {
-
-    outline.attr({
-      x: bbox.x - OUTLINE_OFFSET,
-      y: bbox.y - OUTLINE_OFFSET,
-      width: bbox.width + OUTLINE_OFFSET * 2,
-      height: bbox.height + OUTLINE_OFFSET * 2
-    });
-  }
-
-  events.on('shape.added', function(event) {
-    var element = event.element,
-        gfx = event.gfx;
-
-    var outline = createOutline(gfx);
-
-    updateOutline(outline, getVisual(gfx).getBBox());
-  });
-
-  events.on('connection.change', function(event) {
-    // TODO: update connection outline box
-  });
-
-  events.on('shape.change', function(event) {
-    // TODO: update shape outline box
-  });
-}
-
-Diagram.plugin('outline', [ 'eventBus', 'styles', Outline ]);
-
-module.exports = Outline;
-},{"../Diagram":"4B6uBI","../core/EventBus":8,"../draw/Styles":13,"../util/SvgUtil":31}],19:[function(require,module,exports){
-var Diagram = require('../Diagram'),
-          _ = require('lodash');
-
-/**
- * @namespace djs
- */
-
-/**
- * @class
- */
-function StandardPalette(config, events, canvas, paletteDragDrop, injector) {
-  'use strict';
-
-  events.on('canvas.init', function(event) {
-    init();
-  });
-
-  function init() {
-    var menuConfig = config.menu || {};
-
-    bootstrapMenus(menuConfig);
-
-    events.fire('standard.palette.init');
-
-    // intercept direct canvas clicks to deselect all
-    // selected shapes
-
-  }
-
-  function bootstrapMenus(menus) {
-    if(!menus) {
-      console.warn('Menu was undefined');
-      return;
-    }
-    menus.forEach(function(menu) {
-      var menuContainer = createMenuContainer(menu);
-      //then call menu for init
-      //Add to page
-      menu.parentContainer.appendChild(menuContainer);
-    });
-  }
-
-  function createMenuContainer(menu) {
-    var menuDiv = document.createElement('div');
-    menuDiv.setAttributeNS('http://www.w3.org/1999/xhtml', 'id', 'menu-' + menu.id);
-
-    if(menu.align === 'vertical') {
-      menuDiv.setAttribute('class', 'djs-menu-vertical');
-    } else if(menu.align === 'vertical') {
-      menuDiv.setAttribute('class', 'djs-menu-horizontal');
-    } else {
-      console.warn('Align %s is invalid', menu.align);
-    }
-
-    _.forEach(menu.items, function(item) {
-
-      var icon = document.createElement('i');
-      var button = document.createElement('button');
-      button.setAttribute('class', 'djs-addshape ' + item.cssClass);
-      button.appendChild(icon);
-
-      if(item.text) {
-        var textNode = document.createTextNode(item.text);
-        button.appendChild(textNode);
-      }
-      button.addEventListener(item.action.type, function(event) {
-        injector.invoke(item.action.handler, { event: event });
-      });
-
-      menuDiv.appendChild(button);
-    });
-    var brand = document.createElement('div');
-    brand.setAttribute('class', 'djs-menu-brand');
-    menuDiv.appendChild(brand);
-    return menuDiv;
-  }
-}
-
-Diagram.plugin('standardPalette', [ 'config', 'eventBus', 'canvas', 'paletteDragDrop', 'injector',  StandardPalette ]);
-
-module.exports = StandardPalette;
-},{"../Diagram":"4B6uBI","lodash":36}],20:[function(require,module,exports){
-var _ = require('lodash');
-
-require('../../core/EventBus');
-require('../../core/CommandStack');
-require('../../core/ElementRegistry');
-
-require('../selection/Service');
-
-require('../InteractionEvents');
-
-
-var MoveShapesHandler = require('../../commands/MoveShapesHandler'),
-    Draggable = require('../Draggable'),
-    Diagram = require('../../Diagram');
+var MoveShapesHandler = require('./cmd/MoveShapesHandler'),
+    Draggable = require('../Draggable');
 
 
 /**
@@ -2380,7 +2146,7 @@ function MoveEvents(events, selection, shapes, commandStack) {
     var hoverGfx = ctx.hoverGfx;
 
     if (hoverGfx) {
-      moveContext.newParent = shapes.getShapeByGraphics(hoverGfx);
+      moveContext.newParent = shapes.getByGraphics(hoverGfx);
     }
 
     commandStack.execute('shape.move', moveContext);
@@ -2414,7 +2180,7 @@ function MoveEvents(events, selection, shapes, commandStack) {
         }
 
         _.forEach(dragShapes, function(s) {
-          var gfx = shapes.getGraphicsByShape(s);
+          var gfx = shapes.getGraphicsByElement(s);
           dragGraphics.push(gfx);
         });
 
@@ -2517,29 +2283,16 @@ function MoveEvents(events, selection, shapes, commandStack) {
   });
 }
 
-Diagram.plugin('moveEvents', [
-  'eventBus', 'selection', 'elementRegistry',
-  'commandStack', 'interactionEvents', MoveEvents ]);
+
+MoveEvents.$inject = [ 'eventBus', 'selection', 'elementRegistry', 'commandStack' ];
 
 module.exports = MoveEvents;
-},{"../../Diagram":"4B6uBI","../../commands/MoveShapesHandler":4,"../../core/CommandStack":6,"../../core/ElementRegistry":7,"../../core/EventBus":8,"../Draggable":16,"../InteractionEvents":17,"../selection/Service":23,"lodash":36}],21:[function(require,module,exports){
-require('../../core/EventBus');
-require('../../core/Canvas');
-require('../../core/ElementRegistry');
+},{"../Draggable":16,"./cmd/MoveShapesHandler":21}],20:[function(require,module,exports){
+'use strict';
 
-require('../../draw/Snap');
-require('../../draw/Styles');
+var _ = (window._);
 
-require('../selection/Service');
-require('../services/Rules');
-
-require('../Outline');
-
-require('./MoveEvents');
-
-var Diagram = require('../../Diagram'),
-    _ = require('lodash'),
-    ShapeUtil = require('../../util/ShapeUtil');
+var ShapeUtil = require('../../util/ShapeUtil');
 
 
 /**
@@ -2560,7 +2313,7 @@ function MoveVisuals(events, selection, shapes, canvas, snap, styles, rules) {
   var paper;
 
   function getGfx(s) {
-    return shapes.getGraphicsByShape(s);
+    return shapes.getGraphicsByElement(s);
   }
 
   function getVisualDragShapes(shapeList) {
@@ -2583,7 +2336,7 @@ function MoveVisuals(events, selection, shapes, canvas, snap, styles, rules) {
   }
 
   function addDragger(shape, dragGroup) {
-    var gfx = shapes.getGraphicsByShape(shape);
+    var gfx = shapes.getGraphicsByElement(shape);
     var dragger = gfx.clone();
     var bbox = gfx.getBBox();
 
@@ -2682,27 +2435,276 @@ function MoveVisuals(events, selection, shapes, canvas, snap, styles, rules) {
   });
 }
 
-Diagram.plugin('moveVisuals', [
-  'eventBus', 'selection', 'elementRegistry', 'canvas', 'snap', 'styles', 'rules', 'moveEvents', MoveVisuals
-]);
+
+MoveVisuals.$inject = [
+  'eventBus',
+  'selection',
+  'elementRegistry',
+  'canvas',
+  'snap',
+  'styles',
+  'rules'
+];
 
 module.exports = MoveVisuals;
-},{"../../Diagram":"4B6uBI","../../core/Canvas":5,"../../core/ElementRegistry":7,"../../core/EventBus":8,"../../draw/Snap":12,"../../draw/Styles":13,"../../util/ShapeUtil":30,"../Outline":18,"../selection/Service":23,"../services/Rules":26,"./MoveEvents":20,"lodash":36}],22:[function(require,module,exports){
-var diagramModule = require('../../di').defaultModule;
+},{"../../util/ShapeUtil":34}],21:[function(require,module,exports){
+'use strict';
 
-require('./MoveEvents');
-require('./MoveVisuals');
+var _ = (window._);
 
-function Move() {}
+var ShapeUtil = require('../../../util/ShapeUtil');
 
-diagramModule.type('move', [ 'moveEvents', 'moveVisuals', Move ]);
 
-module.exports = Move;
-},{"../../di":10,"./MoveEvents":20,"./MoveVisuals":21}],23:[function(require,module,exports){
-require('../../core/EventBus');
+/**
+ * Implements re- and undoable movement of shapes and their
+ * related graphical representations.
+ *
+ * @param {ElementRegistry} elementRegistry
+ */
+function MoveShapesHandler(elementRegistry) {
 
-var Diagram = require('../../Diagram'),
-    _ = require('lodash');
+  function getAllMovedShapes(shapes) {
+    var allShapes = ShapeUtil.selfAndAllChildren(shapes);
+    var idMap = {};
+
+    _.forEach(allShapes, function(s) {
+      var id = s.id;
+
+      idMap[s.id] = s;
+    });
+
+    return {
+      shapes: allShapes,
+      byId: idMap
+    };
+  }
+
+  /**
+   * Executes a move shape operation
+   */
+  function execute(ctx) {
+
+    var dx = ctx.dx,
+        dy = ctx.dy,
+        shapes = ctx.shapes,
+        newParent = ctx.newParent;
+
+    var oldParents = {};
+
+    var all = getAllMovedShapes(shapes);
+
+    _.forEach(all.shapes, function(s) {
+      var newX = s.x + dx,
+          newY = s.y + dy,
+          sid = s.id;
+
+      s.x = newX;
+      s.y = newY;
+
+      if (s.parent && all.byId[s.parent.id]) {
+        oldParents[sid] = s.parent;
+      } else {
+        oldParents[sid] = ShapeUtil.setParent(s, newParent);
+      }
+
+      var gfx = elementRegistry.getGraphicsByElement(s);
+      gfx.translate(newX, newY);
+
+      if (s.parent) {
+        var parentGfx = elementRegistry.getGraphicsByElement(s.parent);
+        gfx.insertAfter(parentGfx);
+      }
+    });
+
+    // remember previous parents
+    // TODO(nre): is this a good idea?
+    ctx.oldParents = oldParents;
+
+    return true;
+  }
+
+  /**
+   * Reverts a move shape operation
+   */
+  function revert(ctx) {
+
+    var dx = ctx.dx * -1,
+        dy = ctx.dy * -1,
+        shapes = ctx.shapes,
+        oldParents = ctx.oldParents;
+
+
+    var all = getAllMovedShapes(shapes);
+
+    _.forEach(all.shapes, function(s) {
+      var newX = s.x + dx,
+          newY = s.y + dy;
+
+      s.x = newX;
+      s.y = newY;
+
+      ShapeUtil.setParent(s, oldParents[s.id]);
+
+      var gfx = elementRegistry.getGraphicsByElement(s);
+      gfx.translate(newX, newY);
+    });
+
+    return true;
+  }
+
+  /**
+   * Can move be executed?
+   */
+  function canExecute(ctx) {
+    return true;
+  }
+
+
+  // API
+
+  this.execute = execute;
+  this.revert = revert;
+
+  this.canExecute = canExecute;
+}
+
+
+MoveShapesHandler.$inject = [ 'elementRegistry' ];
+
+module.exports = MoveShapesHandler;
+},{"../../../util/ShapeUtil":34}],22:[function(require,module,exports){
+'use strict';
+
+module.exports = {
+  __depends__: [
+    require('../interaction-events'),
+    require('../selection'),
+    require('../outline'),
+    require('../rules')
+  ],
+  __init__: [ 'moveEvents', 'moveVisuals' ],
+  moveEvents: [ 'type', require('./MoveEvents') ],
+  moveVisuals: [ 'type', require('./MoveVisuals') ]
+};
+
+},{"../interaction-events":18,"../outline":24,"../rules":26,"../selection":29,"./MoveEvents":19,"./MoveVisuals":20}],23:[function(require,module,exports){
+'use strict';
+
+
+var GraphicsUtil = require('../../util/GraphicsUtil');
+
+
+/**
+ * @class
+ *
+ * A plugin that adds an outline to shapes and connections that may be activated and styled
+ * via CSS classes.
+ *
+ * @param {EventBus} events the event bus
+ */
+function Outline(events, styles) {
+
+  var OUTLINE_OFFSET = 5;
+
+  var OUTLINE_STYLE = styles.cls('djs-outline', [ 'no-fill' ]);
+
+  function createOutline(gfx) {
+    return gfx.rect(0, 0, 0, 0)
+            .attr(OUTLINE_STYLE)
+            .prependTo(gfx);
+  }
+
+  function updateOutline(outline, bbox) {
+
+    outline.attr({
+      x: bbox.x - OUTLINE_OFFSET,
+      y: bbox.y - OUTLINE_OFFSET,
+      width: bbox.width + OUTLINE_OFFSET * 2,
+      height: bbox.height + OUTLINE_OFFSET * 2
+    });
+  }
+
+  events.on('shape.added', function(event) {
+    var element = event.element,
+        gfx = event.gfx;
+
+    var outline = createOutline(gfx);
+
+    updateOutline(outline, GraphicsUtil.getVisual(gfx).getBBox());
+  });
+
+  events.on('connection.change', function(event) {
+    // TODO: update connection outline box
+  });
+
+  events.on('shape.change', function(event) {
+    // TODO: update shape outline box
+  });
+}
+
+
+Outline.$inject = ['eventBus', 'styles'];
+
+module.exports = Outline;
+},{"../../util/GraphicsUtil":31}],24:[function(require,module,exports){
+'use strict';
+
+module.exports = {
+  __init__: [ 'outline' ],
+  outline: [ 'type', require('./Outline') ]
+};
+},{"./Outline":23}],25:[function(require,module,exports){
+'use strict';
+
+var _ = (window._);
+
+
+/**
+ * @class
+ *
+ * A service that provides rules for certain diagram actions.
+ *
+ * @param {Object} config the configuration passed to the diagram
+ * @param {EventBus} events the event bus
+ */
+function Rules(config, events) {
+
+  var DEFAULT_RESULT = false;
+
+  /**
+   * This method selects one or more elements on the diagram.
+   *
+   * By passing an additional add parameter you can decide whether or not the element(s)
+   * should be added to the already existing selection or not.
+   *
+   * @method Selection#select
+   *
+   * @param  {String} action the action to be checked
+   * @param  {Object} [context] the context to check the action in
+   */
+  function can(action, context) {
+    return Math.random() > 0.3;
+  }
+
+  return {
+    can: can
+  };
+}
+
+
+Rules.$inject = ['config', 'eventBus' ];
+
+module.exports = Rules;
+},{}],26:[function(require,module,exports){
+'use strict';
+
+module.exports = {
+  rules: [ 'type', require('./Rules') ]
+};
+},{"./Rules":25}],27:[function(require,module,exports){
+'use strict';
+
+var _ = (window._);
 
 
 /**
@@ -2713,7 +2715,7 @@ var Diagram = require('../../Diagram'),
  *
  * @param {EventBus} events the event bus
  */
-function SelectionService(events) {
+function Selection(events) {
 
   var selectedElements = [];
 
@@ -2773,21 +2775,14 @@ function SelectionService(events) {
   };
 }
 
-Diagram.plugin('selection', [ 'eventBus', SelectionService ]);
+Selection.$inject = [ 'eventBus' ];
 
-module.exports = SelectionService;
-},{"../../Diagram":"4B6uBI","../../core/EventBus":8,"lodash":36}],24:[function(require,module,exports){
-require('../../core/EventBus');
-require('../../core/ElementRegistry');
+module.exports = Selection;
+},{}],28:[function(require,module,exports){
+'use strict';
 
+var _ = (window._);
 
-require('../InteractionEvents');
-require('../Outline');
-
-require('./Service');
-
-var Diagram = require('../../Diagram'),
-    _ = require('lodash');
 
 /**
  * @class
@@ -2799,9 +2794,9 @@ var Diagram = require('../../Diagram'),
  *
  * @param {EventBus} events
  * @param {SelectionService} selection
- * @param {ElementRegistry} shapes
+ * @param {ElementRegistry} elementRegistry
  */
-function SelectionVisuals(events, selection, shapes) {
+function SelectionVisuals(events, selection, elementRegistry) {
 
   var HOVER_CLS = 'hover',
       SELECTED_CLS = 'selected';
@@ -2835,11 +2830,11 @@ function SelectionVisuals(events, selection, shapes) {
   events.on('selection.changed', function(event) {
 
     function deselect(s) {
-      addMarker(shapes.getGraphicsByShape(s), SELECTED_CLS);
+      addMarker(elementRegistry.getGraphicsByElement(s), SELECTED_CLS);
     }
 
     function select(s) {
-      removeMarker(shapes.getGraphicsByShape(s), SELECTED_CLS);
+      removeMarker(elementRegistry.getGraphicsByElement(s), SELECTED_CLS);
     }
 
     var oldSelection = event.oldSelection,
@@ -2858,175 +2853,34 @@ function SelectionVisuals(events, selection, shapes) {
     });
   });
 
-  // intercept direct canvas clicks to deselect all
-  // selected shapes
-  events.on('canvas.init', function(event) {
-    var paper = event.paper;
-
-    paper.click(function(event) {
-      if (event.srcElement === paper.node) {
-        selection.select(null);
-      }
-    });
+  // deselect all selected shapes on canvas click
+  events.on('canvas.click', function(event) {
+    if (event.srcElement === event.paper.node) {
+      selection.select(null);
+    }
   });
 }
 
-Diagram.plugin('selectionVisuals', [
+SelectionVisuals.$inject = [
   'eventBus',
   'selection',
-  'elementRegistry',
-  'interactionEvents',
-  'outline', SelectionVisuals ]);
+  'elementRegistry'
+];
 
 module.exports = SelectionVisuals;
-},{"../../Diagram":"4B6uBI","../../core/ElementRegistry":7,"../../core/EventBus":8,"../InteractionEvents":17,"../Outline":18,"./Service":23,"lodash":36}],25:[function(require,module,exports){
+},{}],29:[function(require,module,exports){
 'use strict';
 
-var Diagram = require('../../Diagram'),
-    ShapeUtil = require('../../util/ShapeUtil');
-
-var _ = require('lodash');
-
-
-/**
- * @namespace djs
- */
-
-/**
- * @class
- *
- * A service that allow to drop an element via drag (from palette)
- * to the canvas (drop).
- */
-function PaletteDragDrop(canvas, events, elementRegistry) {
-
-  var dragInProgress = false;
-
-  events.on('standard.palette.init', function(event) {
-    init();
-  });
-
-  function init() {
-    // mouseenter does not work as chrome doesn't fire
-    // the event if left button is pressed
-
-    var paper = canvas.getPaper();
-    paper.node.addEventListener('mousemove', paletteMoveListener);
-    paper.node.addEventListener('mouseup', canvasOnMouseUp);
-
-    document.addEventListener('mouseup', canvasOnMouseUpAnywhere);
-    document.addEventListener('keyup', onEscapeKey);
-  }
-
-  /**
-   * Handles what happen in the canvas
-   */
-  var paletteMoveListener = function paletteMoveListener() {
-    if(dragInProgress) {
-      // TODO dragging draw shape
-    }
-  };
-
-  /**
-   * What happens on mouseup event over canvas
-   */
-  var canvasOnMouseUp = function canvasOnMouseUp(mouseEvent) {
-    if(dragInProgress && mouseEvent.button === 0) {
-      var newShape = {
-        x: mouseEvent.clientX - 90 / 2.5,
-        y: mouseEvent.clientY - 90,
-        width: 110,
-        height: 110
-      };
-      canvas.addShape(newShape);
-    }
-    dragInProgress = false;
-  };
-
-  var canvasOnMouseUpAnywhere = function canvasOnMouseUpAnywhere() {
-    dragInProgress = false;
-  };
-
-  var onEscapeKey = function(event) {
-    if(event.keyCode === 27) {
-      dragInProgress = false;
-    }
-  };
-
-
-  /**
-   * Must be called if a draggable button on palette is clicked
-   * It is in the response of the palette to invoke this method.
-   *
-   * @return {boolean} true if dragStart was successful
-   */
-  var startDragAndDrop = function startDragAndDrop() {
-    if(dragInProgress) {
-      console.warn('Drag is still in progress');
-      return false;
-    }
-    dragInProgress = true;
-    return true;
-  };
-
-  /**
-   * @return {boolean} returns the current dragging status.
-   */
-  var isDragInProgress = function isDragInProgress() {
-     return isDragInProgress;
-  };
-
-  return {
-    startDragAndDrop: startDragAndDrop,
-    isDragInProgress: isDragInProgress
-  };
-}
-
-Diagram.plugin('paletteDragDrop', ['canvas', 'eventBus', 'elementRegistry', PaletteDragDrop ]);
-
-module.exports = PaletteDragDrop;
-},{"../../Diagram":"4B6uBI","../../util/ShapeUtil":30,"lodash":36}],26:[function(require,module,exports){
-require('../../core/EventBus');
-
-var Diagram = require('../../Diagram'),
-    _ = require('lodash');
-
-
-/**
- * @class
- *
- * A service that provides rules for certain diagram actions.
- *
- * @param {Object} config the configuration passed to the diagram
- * @param {EventBus} events the event bus
- */
-function Rules(config, events) {
-
-  var DEFAULT_RESULT = false;
-
-  /**
-   * This method selects one or more elements on the diagram.
-   *
-   * By passing an additional add parameter you can decide whether or not the element(s)
-   * should be added to the already existing selection or not.
-   *
-   * @method Selection#select
-   *
-   * @param  {String} action the action to be checked
-   * @param  {Object} [context] the context to check the action in
-   */
-  function can(action, context) {
-    return Math.random() > 0.3;
-  }
-
-  return {
-    can: can
-  };
-}
-
-Diagram.plugin('rules', ['config', 'eventBus', Rules ]);
-
-},{"../../Diagram":"4B6uBI","../../core/EventBus":8,"lodash":36}],27:[function(require,module,exports){
+module.exports = {
+  __init__: [ 'selectionVisuals' ],
+  __depends__: [
+    require('../interaction-events'),
+    require('../outline')
+  ],
+  selection: [ 'type', require('./Selection') ],
+  selectionVisuals: [ 'type', require('./SelectionVisuals') ]
+};
+},{"../interaction-events":18,"../outline":24,"./Selection":27,"./SelectionVisuals":28}],30:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -3048,7 +2902,7 @@ Diagram.plugin('rules', ['config', 'eventBus', Rules ]);
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-var util = require('lodash');
+var util = (window._);
 
 /**
  * An event emitter for the browser that depends on lodash rather than node/util
@@ -3310,7 +3164,50 @@ EventEmitter.listenerCount = function(emitter, type) {
     ret = emitter._events[type].length;
   return ret;
 };
-},{"lodash":36}],28:[function(require,module,exports){
+},{}],31:[function(require,module,exports){
+'use strict';
+
+/**
+ * @module util/GraphicsUtil
+ */
+
+function is(e, cls) {
+  return e.hasClass(cls);
+}
+
+
+/**
+ *
+ * A note on how SVG elements are structured:
+ *
+ * Shape layout:
+ *
+ * [group.djs-group.djs-shape]
+ *  |-> [rect.djs-hit]
+ *  |-> [rect.djs-visual]
+ *  |-> [rect.djs-outline]
+ *  ...
+ *
+ * [group.djs-group.djs-connection]
+ *  |-> [polyline.djs-hit]
+ *  |-> [polyline.djs-visual]
+ *  |-> [polyline.djs-outline]
+ *  ...
+ *
+ */
+
+/**
+ * Returns the visual part of a diagram element
+ *
+ * @param  {snapsvg.Element} gfx
+ * @return {snapsvg.Element}
+ */
+function getVisual(gfx) {
+  return gfx.select('.djs-visual');
+}
+
+module.exports.getVisual = getVisual;
+},{}],32:[function(require,module,exports){
 function IdGenerator(prefix) {
 
   var current = 0;
@@ -3325,8 +3222,8 @@ function IdGenerator(prefix) {
 }
 
 module.exports = IdGenerator;
-},{}],29:[function(require,module,exports){
-var _ = require('lodash');
+},{}],33:[function(require,module,exports){
+var _ = (window._);
 
 var DEFAULT_BOX_PADDING = 5;
 
@@ -3567,8 +3464,8 @@ function LabelUtil(config) {
 
 
 module.exports = LabelUtil;
-},{"lodash":36}],30:[function(require,module,exports){
-var _ = require('lodash');
+},{}],34:[function(require,module,exports){
+var _ = (window._);
 
 /**
  * Adds an element to a collection and returns true if the
@@ -3696,48 +3593,7 @@ module.exports.selfAndDirectChildren = selfAndDirectChildren;
 module.exports.selfAndAllChildren = selfAndAllChildren;
 module.exports.translateShape = translateShape;
 module.exports.setParent = setParent;
-},{"lodash":36}],31:[function(require,module,exports){
-/**
- * @module util/svgUtil
- */
-
-function is(e, cls) {
-  return e.hasClass(cls);
-}
-
-
-/**
- *
- * A note on how SVG elements are structured:
- *
- * Shape layout:
- *
- * [group.djs-group.djs-shape]
- *  |-> [rect.djs-hit]
- *  |-> [rect.djs-visual]
- *  |-> [rect.djs-outline]
- *  ...
- *
- * [group.djs-group.djs-connection]
- *  |-> [polyline.djs-hit]
- *  |-> [polyline.djs-visual]
- *  |-> [polyline.djs-outline]
- *  ...
- *
- */
-
-/**
- * Returns the visual part of a diagram element
- *
- * @param  {snapsvg.Element} gfx
- * @return {snapsvg.Element}
- */
-function getVisual(gfx) {
-  return gfx.select('.djs-visual');
-}
-
-module.exports.getVisual = getVisual;
-},{}],32:[function(require,module,exports){
+},{}],35:[function(require,module,exports){
 
 var isArray = function(obj) {
   return Object.prototype.toString.call(obj) === '[object Array]';
@@ -3787,14 +3643,14 @@ exports.annotate = annotate;
 exports.parse = parse;
 exports.isArray = isArray;
 
-},{}],33:[function(require,module,exports){
+},{}],36:[function(require,module,exports){
 module.exports = {
   annotate: require('./annotation').annotate,
   Module: require('./module'),
   Injector: require('./injector')
 };
 
-},{"./annotation":32,"./injector":34,"./module":35}],34:[function(require,module,exports){
+},{"./annotation":35,"./injector":37,"./module":38}],37:[function(require,module,exports){
 var Module = require('./module');
 var autoAnnotate = require('./annotation').parse;
 var annotate = require('./annotation').annotate;
@@ -4010,7 +3866,7 @@ var Injector = function(modules, parent) {
 
 module.exports = Injector;
 
-},{"./annotation":32,"./module":35}],35:[function(require,module,exports){
+},{"./annotation":35,"./module":38}],38:[function(require,module,exports){
 var Module = function() {
   var providers = [];
 
@@ -4036,10 +3892,4 @@ var Module = function() {
 
 module.exports = Module;
 
-},{}],36:[function(require,module,exports){
-module.exports = window._ || require('../node_modules/lodash');
-},{"../node_modules/lodash":"9TlSmm"}],37:[function(require,module,exports){
-var Snap = window.Snap;
-module.exports = Snap || require('../node_modules/snapsvg');
-
-},{"../node_modules/snapsvg":"BY30BN"}]},{},["4B6uBI",3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31])
+},{}]},{},["4B6uBI",3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34])
